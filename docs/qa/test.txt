@@ -1,3 +1,0 @@
-Binary search is an algorithm that works on sorted arrays.
-It repeatedly divides the search space in half.
-Its time complexity is O(log n).
