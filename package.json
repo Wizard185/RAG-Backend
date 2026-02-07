@@ -16,7 +16,7 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon src/server.js"
+    "dev": "node --max-old-space-size=4096 src/server.js"
   },
   "dependencies": {
     "@google/genai": "^1.40.0",
@@ -24,7 +24,10 @@
     "@langchain/community": "^1.1.12",
     "@langchain/core": "^1.1.19",
     "@langchain/google-genai": "^2.1.15",
+    "@langchain/mixedbread-ai": "^1.0.1",
+    "@langchain/ollama": "^1.2.2",
     "@langchain/pinecone": "^1.0.1",
+    "@langchain/textsplitters": "^1.0.1",
     "@pinecone-database/pinecone": "^7.0.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",

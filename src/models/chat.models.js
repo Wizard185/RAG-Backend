@@ -13,6 +13,10 @@ const chatSchema = new mongoose.Schema(
       enum: ["qa", "custom", "resume"],
       required: true
     },
+    subjectId: {
+      type: String, 
+      required: false, // It's optional because "resume" mode doesn't need it
+    },
     title: {
       type: String,
       default: "New Chat"

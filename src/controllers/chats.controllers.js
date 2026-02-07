@@ -10,11 +10,15 @@ import { askQuestionService } from "../services/chats.services.js";
 // ... imports
 
 export const createChat = asyncHandler(async (req, res) => {
-  const { mode, subjectId } = req.body; // Accept subjectId from body
+  // 1. EXTRACT subjectId
+  const { mode, subjectId } = req.body; 
 
+  if (!mode) throw new ApiError(400, "Mode is required");
+
+  // 2. PASS IT to the service
   const chat = await createChatService(req.user._id, mode, subjectId);
 
-  res.status(201).json(new ApiResponse(201, chat, "Chat created"));
+  return res.status(201).json(new ApiResponse(201, chat, "Chat created"));
 });
 
 // ... keep other controllers (getChats, getChat, etc.) exactly the same
