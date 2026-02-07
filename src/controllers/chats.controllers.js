@@ -7,15 +7,17 @@ import {
   deleteChatService
 } from "../services/chats.services.js";
 import { askQuestionService } from "../services/chats.services.js";
+// ... imports
+
 export const createChat = asyncHandler(async (req, res) => {
-  const { mode } = req.body;
+  const { mode, subjectId } = req.body; // Accept subjectId from body
 
-  const chat = await createChatService(req.user._id, mode);
+  const chat = await createChatService(req.user._id, mode, subjectId);
 
-  res.status(201).json(
-    new ApiResponse(201, chat, "Chat created")
-  );
+  res.status(201).json(new ApiResponse(201, chat, "Chat created"));
 });
+
+// ... keep other controllers (getChats, getChat, etc.) exactly the same
 
 export const getChats = asyncHandler(async (req, res) => {
   const { mode } = req.query;
@@ -64,3 +66,4 @@ export const askQuestion = asyncHandler(async (req, res) => {
     new ApiResponse(201, message, "Answer generated")
   );
 });
+
