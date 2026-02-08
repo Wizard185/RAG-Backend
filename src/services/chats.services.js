@@ -65,7 +65,7 @@ export const askQuestionService = async (userId, chatId, question) => {
   
   // Initialize Gemini (Using 1.5-flash for stability/speed)
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const chatModel = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+  const chatModel = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL });
 
   // 1. SELECT EMBEDDING SOURCE (Automatic Switch based on NODE_ENV)
   let embeddings;
