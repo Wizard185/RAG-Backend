@@ -1,56 +1,62 @@
-import fs from "fs/promises";
+import fs from "fs";
 import { createRequire } from "module";
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import ApiError from "../utils/ApiError.js";
 import { ingestText } from "../rag/ingestion/ingest.service.js";
 
-// Load PDF Library
+// Safe PDF Parser Import
 const require = createRequire(import.meta.url);
-const pdfLib = require("pdf-parse");
+const pdfParse = require("pdf-parse");
 
 export const uploadGlobalTextbook = asyncHandler(async (req, res) => {
+  // 1. Validation
   const { subjectId } = req.body;
   
-  if (!req.file) throw new ApiError(400, "No textbook file uploaded");
-  if (!subjectId) throw new ApiError(400, "Subject ID (e.g., 'physics101') is required");
+  if (!req.file) throw new ApiError(400, "PDF file is required");
+  if (!subjectId) throw new ApiError(400, "Subject ID is required (e.g. 'physics_101')");
 
-  console.log(`📚 ADMIN UPLOAD: Processing ${req.file.originalname} for Subject: ${subjectId}`);
+  console.log(`🌍 Starting Global Upload for: ${subjectId}`);
+  const filePath = req.file.path;
 
-  let rawText = "";
   try {
-    // 1. Extract Text (PDF Support Only for now)
-    if (req.file.mimetype === "application/pdf") {
-        const dataBuffer = await fs.readFile(req.file.path);
-        
-        // Use the robust parser logic we built earlier
-        let parser = typeof pdfLib === 'function' ? pdfLib : pdfLib.default || pdfLib.PDFParse;
-        const data = await parser(dataBuffer);
-        rawText = data.text;
-    } else {
-        throw new ApiError(400, "Only PDF textbooks are supported currently.");
+    // 2. Extract Text (This is fast, so we await it)
+    const dataBuffer = fs.readFileSync(filePath);
+    const data = await pdfParse(dataBuffer);
+    const text = data.text;
+
+    if (!text || text.length < 100) {
+      throw new ApiError(400, "PDF appears empty or unreadable.");
     }
 
-    if (!rawText.trim()) throw new ApiError(400, "Textbook appears empty.");
+    // 3. Cleanup File (Safe to delete now because 'text' is in memory)
+    fs.unlinkSync(filePath);
 
-    // 2. Ingest into GLOBAL Namespace
-    // We force mode="custom" so it goes to 'global-{subjectId}'
-    const result = await ingestText({
-      text: rawText,
-      userId: req.user._id, // Log who uploaded it
-      mode: "custom",       // <--- FORCES GLOBAL NAMESPACE
-      subjectId: subjectId  // <--- DEFINES THE SHARED ROOM
+    // 4. Start Background Ingestion (DO NOT AWAIT)
+    // We start the heavy lifting here but don't make Postman wait for it
+    ingestText({
+      text: text,
+      userId: null, 
+      mode: "custom", 
+      subjectId: subjectId
+    })
+    .then((result) => {
+      console.log(`✅ [Background] Success: ${subjectId} finished uploading!`);
+      console.log(`📊 [Background] Vectors created: ${result.length}`);
+    })
+    .catch((err) => {
+      console.error(`❌ [Background] Error: Upload for ${subjectId} failed!`, err);
     });
 
-    // 3. Cleanup
-    await fs.unlink(req.file.path);
-
-    res.status(200).json(
-      new ApiResponse(200, result, `Textbook uploaded to Global Space: ${subjectId}`)
+    // 5. Respond Immediately
+    // 202 Accepted = "Request received, processing in background"
+    return res.status(202).json(
+      new ApiResponse(202, { status: "Processing started" }, "Textbook is uploading in the background. Check server terminal for completion.")
     );
 
   } catch (error) {
-    await fs.unlink(req.file.path).catch(() => {});
-    throw new ApiError(500, "Textbook processing failed: " + error.message);
+    // Only happens if PDF parsing fails (very rare)
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    throw new ApiError(500, error.message || "Global upload failed");
   }
 });
