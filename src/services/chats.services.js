@@ -63,11 +63,13 @@ export const askQuestionService = async (userId, chatId, question) => {
   const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
   const index = pinecone.index(process.env.PINECONE_INDEX);
   
-  // Initialize Gemini (Using 1.5-flash for stability/speed)
+  // 1. Initialize Gemini
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const chatModel = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL });
+  // Default to flash model if env var is missing
+  const modelName = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+  const chatModel = genAI.getGenerativeModel({ model: modelName });
 
-  // 1. SELECT EMBEDDING SOURCE (Automatic Switch based on NODE_ENV)
+  // 2. SELECT EMBEDDING SOURCE
   let embeddings;
   const isProd = process.env.NODE_ENV === "production";
 
@@ -87,35 +89,88 @@ export const askQuestionService = async (userId, chatId, question) => {
   }
 
   // ---------------------------------------------------------
-  // 2. DETERMINE NAMESPACE & FILTER (SaaS Strategy)
+  // 3. DETERMINE NAMESPACE & FILTER (CRITICAL FIXES)
   // ---------------------------------------------------------
   let namespace;
-  let pineconeFilter = {}; // Default: No filter (public data)
+  
+  // ✅ FIX 1: Initialize filter as undefined (not empty object {})
+  // Pinecone crashes if you send {}, it must be undefined if unused.
+  let pineconeFilter = undefined; 
 
   if (chat.mode === "resume") {
-      // 🌍 Search the global resume container
       namespace = "global-resumes";
-      // 🔒 SECURITY: Only show chunks belonging to THIS user
       pineconeFilter = { userId: { $eq: userId } };
   } else if (chat.mode === "custom") {
-      // Public study groups (shared knowledge)
-      namespace = `global-${chat.subjectId || "general"}`;
+      // Use subjectId for namespace, fallback to 'general'
+      const cleanSubjectId = chat.subjectId || "general";
+      namespace = `global-${cleanSubjectId}`;
   } else {
-      // Fallback for other modes
       namespace = `global-${chat.mode}`;
   }
     
+  // ---------------------------------------------------------
+  // 4. FETCH TITLE PAGE (CONTEXT INJECTION)
+  // ---------------------------------------------------------
+  let titleContext = "";
+  
+  if (chat.mode === "custom" && chat.subjectId) {
+      try {
+          // Construct the ID for the very first chunk of this book
+          // Ensure it matches your ingest.service.js logic: `${subjectId}_chunk_0`
+          const titleChunkId = `${chat.subjectId}_chunk_0`;
+          
+          // ✅ FIX 2: Explicit logging and Array check
+          // Ensure we are passing a valid array of strings
+          if (titleChunkId && titleChunkId.trim() !== "") {
+              console.log(`[DEBUG] Fetching Title Metadata for ID: [${titleChunkId}]`);
+              
+              // Attempt fetch (Try/Catch handles version differences)
+let fetchResult;
+try {
+    // Try standard array syntax
+    fetchResult = await index.namespace(namespace).fetch([titleChunkId]);
+} catch (e) {
+    // Fallback for older/different SDK versions that expect an object
+    fetchResult = await index.namespace(namespace).fetch({ ids: [titleChunkId] });
+}
+              
+              if (fetchResult.records && fetchResult.records[titleChunkId]) {
+                  const text = fetchResult.records[titleChunkId].metadata.text;
+                  titleContext = `
+                  --- SOURCE MATERIAL INFORMATION ---
+                  The user is asking questions about the document titled/containing:
+                  "${text.substring(0, 500)}..."
+                  -----------------------------------
+                  `;
+                  console.log("✅ Title context injected successfully.");
+              }
+          }
+      } catch (err) {
+          // Log but do not crash the chat
+          console.warn("⚠️ Title fetch warning:", err.message);
+      }
+  }
+
+  // ---------------------------------------------------------
+  // 5. VECTOR SEARCH
+  // ---------------------------------------------------------
   let fileContext = "";
   
   try {
     const queryVector = await embeddings.embedQuery(question);
 
-    const searchResult = await index.namespace(namespace).query({
+    const queryOptions = {
       vector: queryVector,
       topK: 5, 
       includeMetadata: true,
-      filter: pineconeFilter // 👈 APPLY THE FILTER HERE
-    });
+    };
+
+    // Only attach filter if it's defined (Fixes the crash)
+    if (pineconeFilter) {
+        queryOptions.filter = pineconeFilter;
+    }
+
+    const searchResult = await index.namespace(namespace).query(queryOptions);
 
     if (searchResult.matches?.length > 0) {
       fileContext = searchResult.matches
@@ -124,9 +179,12 @@ export const askQuestionService = async (userId, chatId, question) => {
     }
   } catch (err) {
     console.error("❌ Vector Search Error:", err.message);
+    // We continue even if retrieval fails, falling back to general knowledge
   }
 
-  // 3. Build Context-Aware Prompt
+  // ---------------------------------------------------------
+  // 6. BUILD PROMPT & GENERATE
+  // ---------------------------------------------------------
   const previousMessages = await Message.find({ chatId }).sort({ createdAt: -1 }).limit(6);
   const historyText = previousMessages
     .reverse()
@@ -134,7 +192,9 @@ export const askQuestionService = async (userId, chatId, question) => {
     .join("\n\n");
 
   const prompt = `
-  You are an expert AI tutor. Use the provided document context to answer the user's question.
+  You are an expert AI tutor. 
+
+  ${titleContext}
 
   --- DOCUMENT CONTEXT ---
   ${fileContext || "No specific document data was found for this query."}
@@ -144,14 +204,14 @@ export const askQuestionService = async (userId, chatId, question) => {
 
   --- NEW QUESTION ---
   User: ${question}
-  
+   
   INSTRUCTIONS:
   1. Priority: Answer using the "Document Context". Mention specific details from it.
-  2. If the answer is NOT in the context, use your internal knowledge but state: "Based on general knowledge..."
-  3. Keep the tone academic, helpful, and clear.
+  2. If the "Source Material Information" above is present, use it to identify the book if asked.
+  3. If the answer is NOT in the context, use your internal knowledge but state: "Based on general knowledge..."
+  4. Keep the tone academic, helpful, and clear.
   `;
 
-  // 4. Generate and Save Response
   const result = await chatModel.generateContent(prompt);
   const aiResponse = result.response.text();
 
