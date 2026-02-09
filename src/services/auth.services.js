@@ -9,6 +9,7 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 /**
  * GOOGLE OAUTH AUTHENTICATION
+ * Fix: Finds user by EMAIL first to link accounts instead of creating duplicates.
  */
 export const googleAuthService = async (idToken) => {
   const ticket = await googleClient.verifyIdToken({
@@ -29,12 +30,19 @@ export const googleAuthService = async (idToken) => {
     picture
   } = payload;
 
-  let user = await User.findOne({
-    authProvider: "google",
-    oauthId: googleId
-  });
+  // ✅ FIX 1: Find by EMAIL instead of just googleId/authProvider
+  let user = await User.findOne({ email });
 
-  if (!user) {
+  if (user) {
+    // User exists! Link Google info to this account if missing
+    if (!user.oauthId) {
+      user.oauthId = googleId;
+    }
+    // Update avatar to latest from Google
+    user.avatar = picture;
+    await user.save();
+  } else {
+    // No user found, create new Google user
     user = await User.create({
       authProvider: "google",
       oauthId: googleId,
@@ -75,15 +83,19 @@ export const signupService = async ({ name, email, password }) => {
 
 /**
  * EMAIL + PASSWORD LOGIN
+ * Fix: Allows login even if authProvider was originally "google" (as long as password exists).
  */
 export const loginService = async ({ email, password }) => {
-  const user = await User.findOne({
-    email,
-    authProvider: "local"
-  }).select("+password");
+  // ✅ FIX 2: Removed { authProvider: "local" } restriction
+  const user = await User.findOne({ email }).select("+password");
 
   if (!user) {
     throw new ApiError(401, "Invalid credentials");
+  }
+
+  // ✅ FIX 3: Check if password exists (Google users might not have one)
+  if (!user.password) {
+    throw new ApiError(400, "Please login with Google (no password set)");
   }
 
   const isMatch = await comparePassword(password, user.password);
@@ -95,4 +107,15 @@ export const loginService = async ({ email, password }) => {
   const token = generateToken({ userId: user._id });
 
   return { user, token };
+};
+export const setPasswordService = async (userId, newPassword) => {
+  const user = await User.findById(userId);
+  if (!user) throw new ApiError(404, "User not found");
+
+  const hashedPassword = await hashPassword(newPassword);
+  
+  user.password = hashedPassword;
+  await user.save();
+
+  return { message: "Password set successfully" };
 };

@@ -4,7 +4,8 @@ import ApiError from "../utils/ApiError.js";
 import {
   googleAuthService,
   signupService,
-  loginService
+  loginService,
+  setPasswordService
 } from "../services/auth.services.js";
 
 /**
@@ -66,5 +67,17 @@ export const login = asyncHandler(async (req, res) => {
       { user, token },
       "Login successful"
     )
+  );
+});
+export const setPassword = asyncHandler(async (req, res) => {
+  const { password } = req.body;
+  if (!password || password.length < 6) {
+    throw new ApiError(400, "Password must be at least 6 characters");
+  }
+
+  await setPasswordService(req.user._id, password);
+
+  res.status(200).json(
+    new ApiResponse(200, null, "Password set successfully. You can now login with email.")
   );
 });
