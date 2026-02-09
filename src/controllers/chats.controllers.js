@@ -4,7 +4,8 @@ import {
   createChatService,
   getChatsByModeService,
   getChatWithMessagesService,
-  deleteChatService
+  deleteChatService,
+  updateChatTitleService
 } from "../services/chats.services.js";
 import { askQuestionService } from "../services/chats.services.js";
 // ... imports
@@ -71,3 +72,13 @@ export const askQuestion = asyncHandler(async (req, res) => {
   );
 });
 
+export const updateChatTitle = asyncHandler(async (req, res) => {
+  const { chatId } = req.params;
+  const { title } = req.body;
+
+  const chat = await updateChatTitleService(req.user._id, chatId, title);
+
+  res.status(200).json(
+    new ApiResponse(200, chat, "Chat title updated")
+  );
+});

@@ -220,3 +220,13 @@ try {
 
   return newMessage;
 };
+
+export const updateChatTitleService = async (userId, chatId, title) => {
+  const chat = await Chat.findOneAndUpdate(
+    { _id: chatId, userId },
+    { title },
+    { new: true } // Return the updated document
+  );
+  if (!chat) throw new ApiError(404, "Chat not found");
+  return chat;
+};

@@ -5,10 +5,11 @@ import {
   getChats,
   getChat,
   deleteChat,
-  askQuestion // <--- IMPORT THE CONTROLLER, NOT THE SERVICE
+  askQuestion,
+  updateChatTitle// <--- IMPORT THE CONTROLLER, NOT THE SERVICE
 } from "../controllers/chats.controllers.js";
 import { validate } from "../middlewares/validate.middlewares.js";
-import { askQuestionSchema } from "../validators/chats.validators.js";
+import { askQuestionSchema,updateChatTitleSchema } from "../validators/chats.validators.js";
 
 const router = Router();
 
@@ -30,6 +31,13 @@ router.post(
   protect,
   validate(askQuestionSchema),
   askQuestion // <--- USE THE CONTROLLER HERE
+);
+
+router.patch(
+  "/:chatId/title",
+  protect,
+  validate(updateChatTitleSchema),
+  updateChatTitle
 );
 
 export default router;
