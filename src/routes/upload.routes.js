@@ -7,7 +7,7 @@ const router = Router();
 
 // 📂 Multer Config: Save files temporarily to a local 'uploads' folder
 const upload = multer({ 
-  dest: "uploads/",
+  dest: "/tmp",
   limits: { fileSize: 5 * 1024 * 1024 } // Limit to 5MB
 });
 
