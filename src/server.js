@@ -3,28 +3,25 @@ dotenv.config();
 import app from "./app.js";
 import { connectMongo } from "./db/mongo.js";
 
-// 1. CONNECT DATABASE OUTSIDE THE LISTENER
-// This ensures the database connects when the serverless function spins up
+// 1. Connect to Database
 connectMongo()
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.error("❌ MongoDB Connection Error:", err));
 
-// 2. LOCAL DEVELOPMENT ONLY
-// Vercel will ignore this block because NODE_ENV will be "production"
-if (process.env.NODE_ENV !== "production") {
-  const PORT = process.env.PORT || 5000;
-  
+// 2. Open Port for Render
+const PORT = process.env.PORT || 10000;
+
+// Listen on 0.0.0.0 as long as we aren't in Vercel's serverless environment
+if (!process.env.VERCEL) {
   const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 Server running locally on port ${PORT} (bound to 0.0.0.0)`);
+    console.log(`🚀 Server running on port ${PORT}`);
   });
 
-  // Local timeouts (Vercel ignores these)
   const TIMEOUT = 600000; 
   server.setTimeout(TIMEOUT);
   server.keepAliveTimeout = TIMEOUT;
   server.headersTimeout = TIMEOUT;
 }
 
-// 3. CRITICAL FOR VERCEL: EXPORT THE APP
-// Vercel's build system looks for this export to route HTTP traffic
+// 3. Export app for Vercel compatibility
 export default app;
