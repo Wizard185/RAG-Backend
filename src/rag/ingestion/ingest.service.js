@@ -3,55 +3,27 @@ import { HuggingFaceInferenceEmbeddings } from "@langchain/community/embeddings/
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { Pinecone } from "@pinecone-database/pinecone";
 
-export const ingestText = async ({ text, userId, mode, subjectId }) => {
+export const ingestText = async ({ text, userId, mode, subjectId, chatId }) => {
   try {
-    console.log(`🚀 Starting Strict Ingestion: ${subjectId || mode}`);
-
     const pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
     const index = pc.index(process.env.PINECONE_INDEX);
     const indexDescription = await pc.describeIndex(process.env.PINECONE_INDEX);
     const upsertUrl = `https://${indexDescription.host}/vectors/upsert`;
     
-    // ---------------------------------------------------------
-    // 1. DETERMINE NAMESPACE
-    // ---------------------------------------------------------
-    let namespace;
-    let uniqueIdPrefix; 
+    const namespace = "global-documents";
     const timestamp = Date.now();
+    const uniqueIdPrefix = `${chatId || mode}_${userId}_${timestamp}`;
 
-    if (mode === "resume") {
-        namespace = "global-resumes";
-        uniqueIdPrefix = `resume_${userId}_${timestamp}`; 
-    } else if (mode === "custom") {
-        namespace = `global-${subjectId || "general"}`;
-        uniqueIdPrefix = `${subjectId}_${timestamp}`;
-    } else {
-        namespace = `global-${mode}`;
-        uniqueIdPrefix = `${mode}_${userId}_${timestamp}`;
-    }
-
-    // =========================================================
-    // 🧹 STRICT CLEANUP (FIXED SYNTAX)
-    // =========================================================
-    // If uploading a resume, DELETE the user's existing data first.
-    if (mode === "resume" && userId) {
-        console.log(`🗑️  Wiping old resume data for user: ${userId}...`);
+    if (chatId && userId) {
         try {
-            // ✅ THE FIX: Wrap the condition inside a 'filter' property
             await index.namespace(namespace).deleteMany({
-                filter: { userId: { $eq: userId } } 
+                filter: { chatId: { $eq: chatId.toString() } } 
             });
-            console.log("✅ Database wiped. Previous resume is gone.");
-        } catch (err) {
-            console.warn("⚠️ Cleanup warning (ignore if first upload):", err.message);
-        }
+        } catch (err) {}
     }
-    // =========================================================
 
-    // 2. SANITIZE TEXT
     const cleanText = text.replace(/\s+/g, " ").trim();
     
-    // 3. SPLIT TEXT
     const splitter = new RecursiveCharacterTextSplitter({
       chunkSize: 300,       
       chunkOverlap: 30,      
@@ -59,7 +31,6 @@ export const ingestText = async ({ text, userId, mode, subjectId }) => {
     });
     const chunks = await splitter.createDocuments([cleanText]);
     
-    // 4. EMBEDDINGS SETUP
     let embeddings;
     const isProd = process.env.NODE_ENV === "production";
     
@@ -76,7 +47,6 @@ export const ingestText = async ({ text, userId, mode, subjectId }) => {
       });
     }
 
-    // 5. BATCH UPLOAD
     const BATCH_SIZE = 20;
 
     for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
@@ -91,9 +61,10 @@ export const ingestText = async ({ text, userId, mode, subjectId }) => {
           values: batchEmbeddings[j],
           metadata: {
             text: chunk.pageContent,
-            userId: userId, 
+            userId: userId.toString(), 
             source_mode: mode,
-            subjectId: subjectId || "personal" 
+            subjectId: subjectId || "personal",
+            chatId: chatId ? chatId.toString() : "none"
           }
         }));
 
@@ -105,16 +76,11 @@ export const ingestText = async ({ text, userId, mode, subjectId }) => {
           },
           body: JSON.stringify({ vectors, namespace })
         });
-
-      } catch (err) {
-        console.error(`⚠️ Batch ${i} failed.`, err);
-      }
+      } catch (err) {}
     }
 
     return { success: true, chunks: chunks.length, namespace };
-
   } catch (error) {
-    console.error("❌ Ingestion Failed:", error);
     throw error;
   }
 };
